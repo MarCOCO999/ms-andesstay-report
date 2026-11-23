@@ -1,6 +1,7 @@
 package com.andesstay.ms_andesstay_report.web;
 
 import com.andesstay.ms_andesstay_report.web.dto.KpisResponse;
+import com.andesstay.ms_andesstay_report.web.dto.StatusSummaryResponse;
 import com.andesstay.ms_andesstay_report.web.dto.TopUnitResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -10,7 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** API de solo lectura para Admin: reservas por hora, tiempo de ciclo, ocupacion activa y unidades top. */
+/**
+ * API de solo lectura para Admin: reservas por hora, tiempo de ciclo, ocupacion activa y unidades
+ * top (desde reservations.events) y estado actual de las reservas (desde audit.timeline).
+ */
 @RestController
 @RequestMapping("/api/report")
 @PreAuthorize("hasRole('Admin')")
@@ -31,5 +35,10 @@ public class ReportController {
     public List<TopUnitResponse> topUnits(@RequestParam(required = false) String range,
                                            @RequestParam(defaultValue = "10") int limit) {
         return service.topUnits(range, limit);
+    }
+
+    @GetMapping("/status-summary")
+    public StatusSummaryResponse statusSummary() {
+        return service.statusSummary();
     }
 }

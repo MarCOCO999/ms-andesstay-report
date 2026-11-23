@@ -20,26 +20,47 @@ spring:
         jwt:
           issuer-uri: ${AZURE_ISSUER_URI:https://login.microsoftonline.com/fbf645d5-8f6d-45fc-9e8d-c8866d008af1/v2.0}
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Los 3 brokers de infra/kafka/compose.yml (con uno basta para descubrir el cluster).
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    client-id: ms-andesstay-report
+    admin:
+      modify-topic-configs: true
     consumer:
+      # Grupo por defecto; cada @KafkaListener indica el suyo (andesstay.kafka.consumer-groups).
       group-id: ms-andesstay-report
       auto-offset-reset: earliest
+      # Offset confirmado por el contenedor despues de procesar cada registro (ack-mode record).
       enable-auto-commit: false
+      isolation-level: read_committed
+      max-poll-records: 50
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Un mensaje que no es JSON valido llega al error handler (y al DLT) en vez de tumbar el consumidor.
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
         # Jackson 3 nativo (Boot 4): ver JacksonJsonDeserializer/Serializer mas abajo.
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
         spring.json.trusted.packages: com.andesstay.ms_andesstay_report.messaging
+        # Tipo por defecto; AuditTimelineListener lo sobreescribe para audit.timeline.
         spring.json.value.default.type: com.andesstay.ms_andesstay_report.messaging.ReservationEvent
         spring.json.use.type.headers: false
+        # Rebalanceo incremental: solo se mueven las particiones necesarias.
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+        session.timeout.ms: 45000
+        heartbeat.interval.ms: 3000
+        max.poll.interval.ms: 300000
     producer:
+      # Solo publica en los DLT.
+      acks: all
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
       properties:
+        enable.idempotence: true
+        delivery.timeout.ms: 30000
+        request.timeout.ms: 10000
         spring.json.add.type.headers: false
     listener:
       ack-mode: record
+      missing-topics-fatal: false
 
 server:
   port: ${SERVER_PORT:8085}
@@ -49,9 +70,41 @@ andesstay:
     audience: ${AZURE_API_AUDIENCE:api://d6959b0c-9ec2-432e-bddb-54bd0e83ace9}
     roles-claim: roles
   kafka:
-    topic-reservations-events: reservations.events
-    partitions: 3
-    replication-factor: ${KAFKA_TOPIC_REPLICATION_FACTOR:1}
+    # Mismos valores que infra/kafka/scripts/create-topics.sh.
+    topics:
+      # Consumidos (los declaran reservations y audit).
+      reservations-events: reservations.events
+      audit-timeline: audit.timeline
+      reservations-events-dlt:
+        name: reservations.events.DLT
+        partitions: 1
+        replicas: ${KAFKA_TOPIC_REPLICATION_FACTOR:3}
+        configs:
+          "[cleanup.policy]": delete
+          "[retention.ms]": 1209600000
+          "[min.insync.replicas]": ${KAFKA_MIN_INSYNC_REPLICAS:2}
+      audit-timeline-dlt:
+        name: audit.timeline.DLT
+        partitions: 1
+        replicas: ${KAFKA_TOPIC_REPLICATION_FACTOR:3}
+        configs:
+          "[cleanup.policy]": delete
+          "[retention.ms]": 1209600000
+          "[min.insync.replicas]": ${KAFKA_MIN_INSYNC_REPLICAS:2}
+    consumer-groups:
+      # Grupo propio por flujo: report recibe todos los eventos de reservations.events
+      # (independiente de audit) y lleva el avance de audit.timeline por separado.
+      reservations-events: ms-andesstay-report
+      audit-timeline: ms-andesstay-report-snapshots
+      dlt-monitor: ms-andesstay-report-dlt-monitor
+    consumer:
+      # 1 hilo por particion (ambos topicos tienen 3).
+      concurrency: 3
+      retry:
+        max-retries: 3
+        initial-interval-ms: 1000
+        multiplier: 2.0
+        max-interval-ms: 10000
 
 management:
   endpoints:

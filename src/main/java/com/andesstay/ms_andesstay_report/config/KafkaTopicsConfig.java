@@ -5,29 +5,20 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * report tambien declara reservations.events (y su DLT) por si arranca antes que audit;
- * Kafka simplemente ignora la creacion si el topico ya existe con la misma configuracion.
+ * report solo produce en los DLT de los dos topicos que consume, asi que declara esos dos
+ * (reservations.events.DLT tambien lo declara audit con la misma configuracion; Kafka ignora
+ * la segunda creacion). Los topicos de origen los declaran reservations y audit.
  */
 @Configuration
 public class KafkaTopicsConfig {
 
-    private final KafkaProperties kafkaProperties;
-
-    public KafkaTopicsConfig(KafkaProperties kafkaProperties) {
-        this.kafkaProperties = kafkaProperties;
+    @Bean
+    public NewTopic reservationsEventsDeadLetterTopic(KafkaTopicsProperties topics) {
+        return topics.reservationsEventsDlt().toNewTopic();
     }
 
     @Bean
-    public NewTopic reservationsEventsTopic() {
-        return topic(kafkaProperties.topicReservationsEvents());
-    }
-
-    @Bean
-    public NewTopic reservationsEventsDeadLetterTopic() {
-        return topic(kafkaProperties.topicReservationsEvents() + ".DLT");
-    }
-
-    private NewTopic topic(String name) {
-        return new NewTopic(name, kafkaProperties.partitions(), (short) kafkaProperties.replicationFactor());
+    public NewTopic auditTimelineDeadLetterTopic(KafkaTopicsProperties topics) {
+        return topics.auditTimelineDlt().toNewTopic();
     }
 }
